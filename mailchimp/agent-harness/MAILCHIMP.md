@@ -2,7 +2,7 @@
 
 ## Overview
 
-`cli-anything-mailchimp` makes the [Mailchimp Marketing API v3.0](https://mailchimp.com/developer/marketing/docs/fundamentals/) fully agent-native. Every endpoint from the official Swagger spec is exposed as a typed Click command, with JSON output, REPL mode, and auto-pagination support.
+`cli-anything-mailchimp` makes the [Mailchimp Marketing API v3.0](https://mailchimp.com/developer/marketing/docs/fundamentals/) fully agent-native. Every endpoint from the official Swagger spec is exposed as a typed Click command, with JSON output and REPL mode.
 
 **292 commands across 30 resource groups**, covering the full Marketing API surface.
 
@@ -35,7 +35,7 @@ cli-anything-mailchimp [--json] [--version]
 │
 ├── lists           # 66 operations (audiences, members, merge fields, segments, tags, webhooks)
 │   ├── list / get / create / update / delete
-│   ├── list-members / get-subscriber-hash / create-members / ...
+│   ├── list-lists-id-members / get-lists-id-members-id / create-members / ...
 │   ├── list-merge-fields / create-merge-fields / ...
 │   ├── list-segments / get-segment-id / create-segments / ...
 │   └── list-webhooks / get-webhook-id / create-webhooks / ...
@@ -108,6 +108,8 @@ Use the Mailchimp-native field name when piping to `jq` (e.g. `.lists[]`, `.camp
 
 Human mode prints compact key-value pairs for single objects and annotated lists for collections.
 
+Collection commands expose Mailchimp's native `count` and `offset` query parameters where the API supports them. The CLI does not auto-fetch every page by default.
+
 ---
 
 ## Design Decisions
@@ -116,7 +118,7 @@ Human mode prints compact key-value pairs for single objects and annotated lists
 
 2. **Env-var-only auth** — per CLI-Anything convention, no config files. `MAILCHIMP_API_KEY` is the single source of truth.
 
-3. **Verbatim `repl_skin.py`** — the REPL skin is copied unmodified from the `exa` harness as required by CLI-Anything's contribution rules.
+3. **Verbatim `repl_skin.py`** — the REPL skin is copied unmodified from `cli-anything-plugin/repl_skin.py` as required by CLI-Anything's contribution rules.
 
 4. **Path params as positional args** — Mailchimp path parameters (`{list_id}`, `{campaign_id}`, etc.) become required positional Click arguments, keeping commands concise.
 
@@ -147,12 +149,12 @@ mailchimp/agent-harness/
     │   └── ...                           ← one module per tag
     ├── utils/
     │   ├── output.py                     ← _out() JSON/human switch
-    │   └── repl_skin.py                  ← verbatim copy from exa harness
+    │   └── repl_skin.py                  ← verbatim copy from cli-anything-plugin/repl_skin.py
     ├── _codegen/
     │   └── generate.py                   ← spec → commands/*.py generator
     ├── skills/SKILL.md                   ← packaged skill copy
     └── tests/
         ├── TEST.md
-        ├── test_core.py                  ← 17 unit tests (no API key)
+        ├── test_core.py                  ← unit tests (no API key)
         └── test_full_e2e.py              ← 9 live tests (gated on API key)
 ```

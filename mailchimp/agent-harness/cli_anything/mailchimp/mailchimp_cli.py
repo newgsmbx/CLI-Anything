@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import sys
-
 import click
 
 import cli_anything.mailchimp.utils.output as _output_mod
 from cli_anything.mailchimp.commands import ALL_GROUPS
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.option("--json", "use_json", is_flag=True, default=False, help="Output as JSON.")
 @click.version_option("0.1.0", prog_name="cli-anything-mailchimp")
 @click.pass_context
@@ -25,6 +23,8 @@ def cli(ctx: click.Context, use_json: bool) -> None:
     """
     ctx.ensure_object(dict)
     _output_mod.USE_JSON = use_json
+    if ctx.invoked_subcommand is None:
+        _start_repl()
 
 
 # Register all generated resource groups
@@ -33,11 +33,8 @@ for _group in ALL_GROUPS:
 
 
 def main() -> None:
-    """Entry point — drops into REPL if invoked with no arguments."""
-    if len(sys.argv) == 1:
-        _start_repl()
-    else:
-        cli()
+    """Entry point for the Click CLI."""
+    cli()
 
 
 def _start_repl() -> None:

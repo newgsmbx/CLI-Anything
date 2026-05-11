@@ -3,11 +3,14 @@ from setuptools import setup, find_namespace_packages
 
 _here = os.path.abspath(os.path.dirname(__file__))
 
+with open(os.path.join(_here, "cli_anything/mailchimp/README.md"), encoding="utf-8") as fh:
+    long_description = fh.read()
+
 setup(
     name="cli-anything-mailchimp",
     version="0.1.0",
     description="cli-anything harness for the Mailchimp Marketing API v3.0",
-    long_description=open(os.path.join(_here, "cli_anything/mailchimp/README.md")).read(),
+    long_description=long_description,
     long_description_content_type="text/markdown",
     author="cli-anything contributors",
     license="Apache-2.0",

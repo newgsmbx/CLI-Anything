@@ -180,7 +180,7 @@ cli-anything-mailchimp --json campaigns list | jq '.campaigns[].id'
 
 ```bash
 # Get account health
-cli-anything-mailchimp --json ping list | jq '.health_status'
+cli-anything-mailchimp --json ping | jq '.health_status'
 
 # List all audience IDs and names
 cli-anything-mailchimp --json lists list | jq '.lists[] | {id, name}'
@@ -215,7 +215,7 @@ Run `cli-anything-mailchimp` with no arguments to enter the REPL:
   ✓ {"health_status": "Everything's Chimpy!"}
 
 ◆ mailchimp ❯ --json lists list
-{"results": [...], "total_items": 3}
+{"lists": [...], "total_items": 3, "_links": [...]}
 
 ◆ mailchimp ❯ quit
 ```

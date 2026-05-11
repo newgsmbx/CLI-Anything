@@ -18,8 +18,8 @@ export MAILCHIMP_API_KEY=<your-api-key>-<datacenter>
 
 ```bash
 cli-anything-mailchimp ping
-cli-anything-mailchimp lists list --json
-cli-anything-mailchimp campaigns list --count 10 --json
+cli-anything-mailchimp --json lists list
+cli-anything-mailchimp --json campaigns list --count 10
 cli-anything-mailchimp                  # interactive REPL
 ```
 

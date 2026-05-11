@@ -405,6 +405,78 @@ class TestGeneratedCommandsImport(unittest.TestCase):
             params={"skip_merge_validation": True},
         )
 
+    def test_ping_group_invokes_health_check_without_list_subcommand(self):
+        from click.testing import CliRunner
+        from cli_anything.mailchimp.mailchimp_cli import cli
+
+        client = MagicMock()
+        client.get.return_value = {"health_status": "Everything's Chimpy!"}
+
+        with patch("cli_anything.mailchimp.core.client.get_client", return_value=client):
+            result = CliRunner().invoke(cli, ["ping"])
+
+        assert result.exit_code == 0, result.output
+        client.get.assert_called_once_with("/ping", params=None)
+
+    def test_create_members_alias_matches_generated_command(self):
+        from click.testing import CliRunner
+        from cli_anything.mailchimp.commands.lists import lists_group
+
+        client = MagicMock()
+        client.post.return_value = {"id": "member-1"}
+
+        with patch("cli_anything.mailchimp.core.client.get_client", return_value=client):
+            result = CliRunner().invoke(
+                lists_group,
+                [
+                    "create-members",
+                    "list-1",
+                    "--data",
+                    '{"email_address":"user@example.com","status":"subscribed"}',
+                    "--skip-merge-validation",
+                    "true",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        client.post.assert_called_once_with(
+            "/lists/list-1/members",
+            json={"email_address": "user@example.com", "status": "subscribed"},
+            params={"skip_merge_validation": True},
+        )
+
+    def test_invalid_data_json_reports_click_error(self):
+        from click.testing import CliRunner
+        from cli_anything.mailchimp.commands.lists import lists_group
+
+        result = CliRunner().invoke(lists_group, ["create", "--data", "{bad"])
+
+        assert result.exit_code == 2
+        assert "Invalid value for --data" in result.output
+        assert "valid JSON" in result.output
+        assert "Traceback" not in result.output
+
+    def test_extra_params_must_be_json_object(self):
+        from click.testing import CliRunner
+        from cli_anything.mailchimp.commands.lists import lists_group
+
+        result = CliRunner().invoke(lists_group, ["list", "--extra-params", "[]"])
+
+        assert result.exit_code == 2
+        assert "Invalid value for --extra-params" in result.output
+        assert "JSON object" in result.output
+        assert "Traceback" not in result.output
+
+    def test_cli_without_subcommand_starts_repl_through_click(self):
+        from click.testing import CliRunner
+        import cli_anything.mailchimp.mailchimp_cli as mailchimp_cli
+
+        with patch.object(mailchimp_cli, "_start_repl") as start_repl:
+            result = CliRunner().invoke(mailchimp_cli.cli, [])
+
+        assert result.exit_code == 0, result.output
+        start_repl.assert_called_once_with()
+
 
 if __name__ == "__main__":
     unittest.main()
