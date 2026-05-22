@@ -65,8 +65,15 @@ function loadTokens(specTokensPath, cliTokensPath, specDir) {
   let tokensPath = defaultTokensPath;
 
   const isSafePath = (p, base) => {
-    const relative = path.relative(base, p);
-    return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+    try {
+      const realP = fs.existsSync(p) ? fs.realpathSync(p) : path.resolve(p);
+      const realBase = fs.realpathSync(base);
+      const relative = path.relative(realBase, realP);
+      if (path.isAbsolute(relative)) return false;
+      return !relative.startsWith('..' + path.sep) && relative !== '..';
+    } catch (e) {
+      return false;
+    }
   };
 
   if (cliTokensPath) {
