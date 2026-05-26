@@ -12,8 +12,9 @@ setup(
     author="cli-anything",
     packages=find_namespace_packages(include=["cli_anything.*"]),
     package_data={
-        "cli_anything.siyuan": ["skills/*.md", "tests/TEST.md"],
+        "cli_anything.siyuan": ["skills/*.md"],
     },
+    include_package_data=True,
     python_requires=">=3.10",
     install_requires=[
         "click>=8.0",

@@ -132,7 +132,7 @@ pytest cli_anything/siyuan/tests/test_core.py cli_anything/siyuan/tests/test_cli
 pytest cli_anything/siyuan/tests/ -v
 ```
 
-**33 tests** (18 unit + 15 CLI command tests + optional E2E tests against a live instance).
+**33 tests** (12 unit + 15 CLI command tests + 6 optional E2E tests against a live instance).
 
 ## Notes
 
