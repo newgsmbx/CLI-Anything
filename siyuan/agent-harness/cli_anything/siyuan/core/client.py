@@ -38,12 +38,14 @@ def load_config(config_path: str | None = None) -> SiYuanConfig:
         try:
             data = json.loads(config_file.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            data = {}
-        return SiYuanConfig(
-            host=data.get("host", "127.0.0.1"),
-            port=data.get("port", 6806),
-            token=data.get("token", ""),
-        )
+            data = None
+
+        if data is not None:
+            return SiYuanConfig(
+                host=data.get("host", "127.0.0.1"),
+                port=data.get("port", 6806),
+                token=data.get("token", ""),
+            )
 
     return SiYuanConfig(
         host=os.environ.get("SIYUAN_HOST", "127.0.0.1"),
