@@ -55,7 +55,18 @@ class SiYuanContext:
         self.session = get_session()
 
 
-@click.group(invoke_without_command=True)
+class _CatchErrors(click.Group):
+    """Click Group that converts SiYuanClientError to clean CLI errors."""
+
+    def invoke(self, ctx: click.Context) -> object:
+        try:
+            return super().invoke(ctx)
+        except SiYuanClientError as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+
+
+@click.group(cls=_CatchErrors, invoke_without_command=True)
 @click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
 @click.option("--host", default="", help="SiYuan host (default: 127.0.0.1)")
 @click.option("--port", default=0, type=int, help="SiYuan port (default: 6806)")
