@@ -278,32 +278,16 @@ def _restore_cwd_cmd(session: Any) -> str:
     return f"cd {_q(stripped)}" if stripped else f"cd {_here_path('')}"
 
 
-def _wrap_absolute(operation: str, session: Any, *, deeper: str = "") -> str:
-    """Build a ``cd %here%[/deeper]\\n<operation>\\n<restore>`` triplet for
-    absolute harness paths, so the operation runs against the tab root
-    regardless of lane cwd drift.
+def _anchor_path_cmd(deeper: str = "") -> str:
+    """Build a single ``cd %here%[/<deeper>]`` command line, shell-quoted.
 
-    USE FOR cleanup-line idioms ONLY — operations whose error doesn't gate
-    further wrapper-side action (``ls``, ``cat``, ``click``, ``grep``).
-    DOMShell's multi-line semantics continue past per-line errors, which
-    is the correct property for "always run the restore" but the WRONG
-    property for **safety chains** where the second step depends on the
-    first step's success. For safety chains (e.g. ``type_text``'s
-    ``focus → type``), issue anchor / operation / restore as SEPARATE
-    ``_call_execute`` calls and ``_is_error``-check between them. See
-    ``type_text``'s absolute-path branch for the pattern.
-
-    ``deeper`` is the optional tab-root-relative subdir to ``cd`` into
-    BEFORE the operation. Used for ``ls /main`` where the operation is
-    bare ``ls`` (and the ``/main`` needs to become the anchored cwd) as
-    opposed to ``cat /main/btn`` where the operation already carries the
-    relative path and we just anchor at the tab root.
-
-    The ``%here%/<deeper>`` token is shell-quoted as a single unit via
-    ``_here_path``, so paths containing whitespace or other shell
-    metacharacters survive the wrap correctly.
+    The reusable anchor primitive for split-and-check wrapper patterns.
+    Every absolute-path wrapper (ls/cat/click/grep) issues this as its
+    first ``_call_execute``, then ``_is_error``-checks the result before
+    running the operation. Used for the anchor and restore positions in
+    the split-and-check pattern.
     """
-    return f"cd {_here_path(deeper)}\n{operation}\n{_restore_cwd_cmd(session)}"
+    return f"cd {_here_path(deeper)}"
 
 
 # CSI (ANSI) escape sequences DOMShell wraps error text in (typically red).
@@ -339,6 +323,68 @@ def _is_error(result: Any) -> bool:
                 text += piece
     text = _ANSI_CSI_RE.sub("", text)
     return text.strip().lower().startswith("error")
+
+
+def _extract_text(result: Any) -> str:
+    """Concatenate ``content[*].text`` from a CallToolResult-like object."""
+    text = ""
+    content = getattr(result, "content", None)
+    if content:
+        for c in content:
+            piece = getattr(c, "text", None)
+            if piece:
+                text += piece
+    return text
+
+
+def _parse_execute_result(result: Any, command: str) -> dict:
+    """Translate a ``domshell_execute`` text response into the dict shape
+    ``browser_cli.py`` and friends consume.
+
+    DOMShell 2.x returns text content over MCP (plus a trailing
+    ``[lane: <id>]`` marker). The CLI was written for the pre-2.0
+    per-command tools, which returned structured dicts — so without
+    this translator the harness throws ``AttributeError`` on
+    ``result.get("entries")`` / ``result.get("matches")`` etc.
+
+    The shape contract per command (read off the CLI callers):
+
+    * ``ls``  → ``{"entries": [{"name", "role", "path"}, ...], "raw"}``
+    * ``grep``→ ``{"matches": [...], "raw"}``
+    * error  → ``{"error": text, "output": text}`` (caller checks
+      ``"error" in result`` before normal handling)
+    * other  → ``{"output": text}`` (CLI's ``output()`` / ``_print_dict``
+      handles arbitrary dicts; ``page.go_back/forward`` skip the
+      ``set_url`` step if ``"url"`` is absent, matching today's behavior)
+
+    This is a minimum-viable parser that satisfies the dict-key
+    contract. Finer-grained parsing of element name / role / path
+    columns can land as a follow-up once DOMShell's exact text format
+    stabilizes — for now every line is plumbed through as the ``name``
+    field (and the ``path`` field) so the CLI's table view still
+    renders rather than crashing.
+    """
+    text = _LANE_LINE.sub("", _extract_text(result)).strip()
+
+    if _is_error(result):
+        return {"error": text, "output": text}
+
+    if command == "ls":
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        entries = [
+            {"name": ln.strip(), "role": "", "path": ln.strip()}
+            for ln in lines
+        ]
+        return {"entries": entries, "raw": text}
+
+    if command == "grep":
+        matches = [ln for ln in text.splitlines() if ln.strip()]
+        return {"matches": matches, "raw": text}
+
+    # cd / cat / click / focus / type / open / refresh / back / forward
+    # all funnel through the CLI's generic dict pretty-printer; an
+    # ``{"output": text}`` shape is enough.
+    return {"output": text}
 
 
 def _assert_single_line(field: str, value: str) -> None:
@@ -520,14 +566,30 @@ def ls(path: str = "/", use_daemon: bool = False, *, session: Any = None) -> dic
     """
     translated, is_absolute = _translate_path(path)
     if is_absolute:
-        # `ls /main`: cd to %here%/main, run bare ls, restore.
-        # `ls /`:     cd to %here%,      run bare ls, restore.
-        command = _wrap_absolute("ls", session, deeper=translated)
-    elif translated:
-        command = f"ls {_q(translated)}"
+        # Split-and-check: the anchor's success is load-bearing — if
+        # cd fails, ls would run in the wrong cwd and produce
+        # wrong-target results. Three separate _call_execute calls so
+        # we can _is_error-gate after the anchor and skip the operation
+        # cleanly. All share the persisted lane via session.
+        anchor = asyncio.run(_call_execute(
+            _anchor_path_cmd(translated), use_daemon, session=session,
+        ))
+        if _is_error(anchor):
+            return _parse_execute_result(anchor, "ls")
+        op = asyncio.run(_call_execute("ls", use_daemon, session=session))
+        # Best-effort restore — ls already ran; restore failure is
+        # cosmetic (next harness cd corrects any drift).
+        asyncio.run(_call_execute(
+            _restore_cwd_cmd(session), use_daemon, session=session,
+        ))
+        return _parse_execute_result(op, "ls")
+    if translated:
+        op = asyncio.run(_call_execute(
+            f"ls {_q(translated)}", use_daemon, session=session,
+        ))
     else:
-        command = "ls"
-    return asyncio.run(_call_execute(command, use_daemon, session=session))
+        op = asyncio.run(_call_execute("ls", use_daemon, session=session))
+    return _parse_execute_result(op, "ls")
 
 
 def cd(path: str, use_daemon: bool = False, *, session: Any = None) -> dict:
@@ -546,17 +608,19 @@ def cd(path: str, use_daemon: bool = False, *, session: Any = None) -> dict:
         {"path": "/main/div[0]", "element": {...}}
     """
     translated, is_absolute = _translate_path(path)
-    # cd is the rare case where the operation IS the new state — no
-    # restore needed. Absolute targets anchor via `cd %here%/<rest>` so
+    # cd is the one wrapper where the operation IS the new state — no
+    # following operation needs the anchored cwd, so no split-and-check
+    # and no restore. Absolute targets anchor via `cd %here%/<rest>` so
     # the result is independent of the lane's current cwd.
     if is_absolute:
-        command = f"cd {_here_path(translated)}"
+        command = _anchor_path_cmd(translated)
     elif translated:
         command = f"cd {_q(translated)}"
     else:
         # Bare/empty `cd` → back to tab root.
-        command = f"cd {_here_path('')}"
-    return asyncio.run(_call_execute(command, use_daemon, session=session))
+        command = _anchor_path_cmd("")
+    result = asyncio.run(_call_execute(command, use_daemon, session=session))
+    return _parse_execute_result(result, "cd")
 
 
 def cat(path: str, use_daemon: bool = False, *, session: Any = None) -> dict:
@@ -581,12 +645,26 @@ def cat(path: str, use_daemon: bool = False, *, session: Any = None) -> dict:
             "Use `ls` to list the root's children, or pass a specific name."
         )
     if is_absolute:
-        # `cat /main/btn`: anchor at tab root, run `cat main/btn` relative,
-        # restore the harness's tracked cwd.
-        command = _wrap_absolute(f"cat {_q(translated)}", session)
-    else:
-        command = f"cat {_q(translated)}"
-    return asyncio.run(_call_execute(command, use_daemon, session=session))
+        # Split-and-check: anchor at tab root, halt if anchor fails,
+        # otherwise run relative cat, restore. Anchor success is
+        # load-bearing — without it cat resolves the relative path
+        # against the wrong cwd.
+        anchor = asyncio.run(_call_execute(
+            _anchor_path_cmd(""), use_daemon, session=session,
+        ))
+        if _is_error(anchor):
+            return _parse_execute_result(anchor, "cat")
+        op = asyncio.run(_call_execute(
+            f"cat {_q(translated)}", use_daemon, session=session,
+        ))
+        asyncio.run(_call_execute(
+            _restore_cwd_cmd(session), use_daemon, session=session,
+        ))
+        return _parse_execute_result(op, "cat")
+    op = asyncio.run(_call_execute(
+        f"cat {_q(translated)}", use_daemon, session=session,
+    ))
+    return _parse_execute_result(op, "cat")
 
 
 def grep(
@@ -635,36 +713,40 @@ def grep(
     translated_path, path_abs = _translate_path(path)
     if not translated_path:
         # Unrooted grep — operate on lane cwd, no cd, no restore.
-        return asyncio.run(
-            _call_execute(f"grep {_q(pattern)}", use_daemon, session=session)
-        )
+        op = asyncio.run(_call_execute(
+            f"grep {_q(pattern)}", use_daemon, session=session,
+        ))
+        return _parse_execute_result(op, "grep")
 
     _assert_single_line("path", path)
     _assert_single_line("prev", prev)
 
+    # Split-and-check. Anchor success is load-bearing: if the cd
+    # to the rooting path fails, grep would search against the wrong
+    # cwd and produce wrong-scope matches.
     if path_abs:
-        # Absolute path: anchor at `%here%/<target>`, grep, restore to the
-        # harness's tracked working_dir (so the lane cwd doesn't drift).
-        # The `%here%/<target>` token is quoted as a single unit by
-        # `_here_path` — survives whitespace / shell metachars cleanly.
-        cd_line = f"cd {_here_path(translated_path)}"
-        restore = _restore_cwd_cmd(session)
+        anchor_cmd = _anchor_path_cmd(translated_path)
+        restore_cmd = _restore_cwd_cmd(session)
     else:
-        # Relative path: lane cwd is the right reference. `prev` defaults
-        # to "/" — for relative grep we just go back to whatever caller
-        # asked, shell-quoted (or `%here%/...` for absolute prev).
         translated_prev, prev_abs = _translate_path(prev)
-        cd_line = f"cd {_q(translated_path)}"
+        anchor_cmd = f"cd {_q(translated_path)}"
         if prev_abs:
-            restore = f"cd {_here_path(translated_prev)}"
+            restore_cmd = _anchor_path_cmd(translated_prev)
         else:
-            restore = (
+            restore_cmd = (
                 f"cd {_q(translated_prev)}"
                 if translated_prev
-                else f"cd {_here_path('')}"
+                else _anchor_path_cmd("")
             )
-    command = f"{cd_line}\ngrep {_q(pattern)}\n{restore}"
-    return asyncio.run(_call_execute(command, use_daemon, session=session))
+
+    anchor = asyncio.run(_call_execute(anchor_cmd, use_daemon, session=session))
+    if _is_error(anchor):
+        return _parse_execute_result(anchor, "grep")
+    op = asyncio.run(_call_execute(
+        f"grep {_q(pattern)}", use_daemon, session=session,
+    ))
+    asyncio.run(_call_execute(restore_cmd, use_daemon, session=session))
+    return _parse_execute_result(op, "grep")
 
 
 def click(path: str, use_daemon: bool = False, *, session: Any = None) -> dict:
@@ -688,10 +770,26 @@ def click(path: str, use_daemon: bool = False, *, session: Any = None) -> dict:
             "click: an element name is required — cannot click the tab root."
         )
     if is_absolute:
-        command = _wrap_absolute(f"click {_q(translated)}", session)
-    else:
-        command = f"click {_q(translated)}"
-    return asyncio.run(_call_execute(command, use_daemon, session=session))
+        # Split-and-check: anchor at tab root, halt if anchor fails,
+        # otherwise click the relative path, restore. Anchor success is
+        # load-bearing — clicking the wrong element if cwd has drifted
+        # could trigger an unintended action.
+        anchor = asyncio.run(_call_execute(
+            _anchor_path_cmd(""), use_daemon, session=session,
+        ))
+        if _is_error(anchor):
+            return _parse_execute_result(anchor, "click")
+        op = asyncio.run(_call_execute(
+            f"click {_q(translated)}", use_daemon, session=session,
+        ))
+        asyncio.run(_call_execute(
+            _restore_cwd_cmd(session), use_daemon, session=session,
+        ))
+        return _parse_execute_result(op, "click")
+    op = asyncio.run(_call_execute(
+        f"click {_q(translated)}", use_daemon, session=session,
+    ))
+    return _parse_execute_result(op, "click")
 
 
 def open_url(url: str, use_daemon: bool = False, *, session: Any = None) -> dict:
@@ -709,9 +807,10 @@ def open_url(url: str, use_daemon: bool = False, *, session: Any = None) -> dict
         >>> open_url("https://example.com")
         {"url": "https://example.com", "status": "loaded"}
     """
-    return asyncio.run(
+    result = asyncio.run(
         _call_execute(f"open {_q(url)}", use_daemon, session=session)
     )
+    return _parse_execute_result(result, "open")
 
 
 def reload(use_daemon: bool = False, *, session: Any = None) -> dict:
@@ -724,7 +823,8 @@ def reload(use_daemon: bool = False, *, session: Any = None) -> dict:
     Returns:
         Dict with reload result
     """
-    return asyncio.run(_call_execute("refresh", use_daemon, session=session))
+    result = asyncio.run(_call_execute("refresh", use_daemon, session=session))
+    return _parse_execute_result(result, "refresh")
 
 
 def back(use_daemon: bool = False, *, session: Any = None) -> dict:
@@ -737,7 +837,8 @@ def back(use_daemon: bool = False, *, session: Any = None) -> dict:
     Returns:
         Dict with navigation result
     """
-    return asyncio.run(_call_execute("back", use_daemon, session=session))
+    result = asyncio.run(_call_execute("back", use_daemon, session=session))
+    return _parse_execute_result(result, "back")
 
 
 def forward(use_daemon: bool = False, *, session: Any = None) -> dict:
@@ -750,7 +851,8 @@ def forward(use_daemon: bool = False, *, session: Any = None) -> dict:
     Returns:
         Dict with navigation result
     """
-    return asyncio.run(_call_execute("forward", use_daemon, session=session))
+    result = asyncio.run(_call_execute("forward", use_daemon, session=session))
+    return _parse_execute_result(result, "forward")
 
 
 def type_text(
@@ -839,11 +941,11 @@ def type_text(
     # best-effort call. All four share the persisted lane via session.
     if is_absolute:
         anchor_result = asyncio.run(_call_execute(
-            f"cd {_here_path('')}", use_daemon, session=session,
+            _anchor_path_cmd(""), use_daemon, session=session,
         ))
         if _is_error(anchor_result):
             # Anchor failed — we never moved, so no restore is needed.
-            return anchor_result
+            return _parse_execute_result(anchor_result, "focus")
 
     focus_result = asyncio.run(_call_execute(
         f"focus {_q(translated_path)}", use_daemon, session=session,
@@ -856,7 +958,7 @@ def type_text(
             asyncio.run(_call_execute(
                 _restore_cwd_cmd(session), use_daemon, session=session,
             ))
-        return focus_result
+        return _parse_execute_result(focus_result, "focus")
 
     type_result = asyncio.run(_call_execute(
         f"type {_q(text)}", use_daemon, session=session,
@@ -870,7 +972,7 @@ def type_text(
             _restore_cwd_cmd(session), use_daemon, session=session,
         ))
 
-    return type_result
+    return _parse_execute_result(type_result, "type")
 
 
 # ── Daemon control functions ───────────────────────────────────────────

@@ -46,25 +46,32 @@ def test_translate_path_preserves_relative():
 
 
 @patch.object(backend, "_call_execute", new_callable=AsyncMock)
-def test_ls_absolute_path_wraps_with_cd_anchor_and_restore(mock_call):
-    """`ls /main` from a `/main` session: cd-anchor + bare ls + restore."""
+def test_ls_absolute_path_uses_three_separate_calls(mock_call):
+    """Split-and-check: anchor → bare ls → restore, three distinct calls.
+
+    Anchor success is load-bearing — if the cd fails, ls would run in
+    the wrong cwd. Tested separately by
+    test_ls_anchor_failure_short_circuits.
+    """
     mock_call.return_value = _make_result("[lane: 1]")
     sess = _make_session(working_dir="/main")
     backend.ls("/main", session=sess)
-    cmd = mock_call.call_args.args[0]
-    assert "cd %here%/main" in cmd
-    assert "\nls\n" in cmd
-    assert cmd.endswith("cd %here%/main")
+    assert mock_call.call_count == 3
+    assert mock_call.call_args_list[0].args[0] == "cd %here%/main"  # anchor
+    assert mock_call.call_args_list[1].args[0] == "ls"               # op
+    assert mock_call.call_args_list[2].args[0] == "cd %here%/main"  # restore
 
 
 @patch.object(backend, "_call_execute", new_callable=AsyncMock)
 def test_ls_root_from_drifted_cwd_anchors_at_here(mock_call):
-    """The Codex P1 case: `ls /` from a drifted `/main` cwd anchors at tab root."""
+    """The Codex P1 case: `ls /` from a drifted `/main` cwd."""
     mock_call.return_value = _make_result("[lane: 1]")
     sess = _make_session(working_dir="/main")
     backend.ls("/", session=sess)
-    cmd = mock_call.call_args.args[0]
-    assert cmd == "cd %here%\nls\ncd %here%/main"
+    assert mock_call.call_count == 3
+    assert mock_call.call_args_list[0].args[0] == "cd %here%"         # anchor at tab root
+    assert mock_call.call_args_list[1].args[0] == "ls"                # bare ls
+    assert mock_call.call_args_list[2].args[0] == "cd %here%/main"   # back to /main
 
 
 @patch.object(backend, "_call_execute", new_callable=AsyncMock)
@@ -84,8 +91,8 @@ def test_ls_absolute_path_with_spaces_quoted(mock_call):
     """
     mock_call.return_value = _make_result("[lane: 1]")
     backend.ls("/path with spaces", session=_make_session(working_dir="/"))
-    cmd = mock_call.call_args.args[0]
-    assert "cd '%here%/path with spaces'" in cmd
+    # Anchor (first call) is the quoted form.
+    assert mock_call.call_args_list[0].args[0] == "cd '%here%/path with spaces'"
 
 
 @patch.object(backend, "_call_execute", new_callable=AsyncMock)
@@ -121,12 +128,15 @@ def test_cd_relative_quoted(mock_call):
 
 
 @patch.object(backend, "_call_execute", new_callable=AsyncMock)
-def test_cat_absolute_path_wraps(mock_call):
-    """`cat /main/btn`: anchor at tab root, run relative cat, restore."""
+def test_cat_absolute_path_uses_three_separate_calls(mock_call):
+    """`cat /main/btn`: anchor at tab root → cat main/btn → restore."""
     mock_call.return_value = _make_result("[lane: 1]")
     sess = _make_session(working_dir="/")
     backend.cat("/main/btn", session=sess)
-    assert mock_call.call_args.args[0] == "cd %here%\ncat main/btn\ncd %here%"
+    assert mock_call.call_count == 3
+    assert mock_call.call_args_list[0].args[0] == "cd %here%"
+    assert mock_call.call_args_list[1].args[0] == "cat main/btn"
+    assert mock_call.call_args_list[2].args[0] == "cd %here%"
 
 
 @patch.object(backend, "_call_execute", new_callable=AsyncMock)
@@ -144,14 +154,14 @@ def test_cat_root_raises_value_error():
 
 
 @patch.object(backend, "_call_execute", new_callable=AsyncMock)
-def test_click_absolute_path_wraps(mock_call):
+def test_click_absolute_path_uses_three_separate_calls(mock_call):
     mock_call.return_value = _make_result("[lane: 1]")
     sess = _make_session(working_dir="/main")
     backend.click("/main/button[0]", session=sess)
-    assert (
-        mock_call.call_args.args[0]
-        == "cd %here%\nclick 'main/button[0]'\ncd %here%/main"
-    )
+    assert mock_call.call_count == 3
+    assert mock_call.call_args_list[0].args[0] == "cd %here%"
+    assert mock_call.call_args_list[1].args[0] == "click 'main/button[0]'"
+    assert mock_call.call_args_list[2].args[0] == "cd %here%/main"
 
 
 @patch.object(backend, "_call_execute", new_callable=AsyncMock)
@@ -172,28 +182,193 @@ def test_click_root_raises_value_error():
 
 
 @patch.object(backend, "_call_execute", new_callable=AsyncMock)
-def test_grep_rooted_absolute_anchors_at_here(mock_call):
-    """Rooted grep with absolute path anchors at tab root + restores wd."""
+def test_grep_rooted_absolute_uses_three_separate_calls(mock_call):
+    """Rooted grep (absolute): anchor → grep → restore, three distinct calls."""
     mock_call.return_value = _make_result("[lane: 1]")
     backend.grep(
         "Login", path="/main", prev="/", session=_make_session(working_dir="/"),
     )
-    assert (
-        mock_call.call_args.args[0]
-        == "cd %here%/main\ngrep Login\ncd %here%"
-    )
+    assert mock_call.call_count == 3
+    assert mock_call.call_args_list[0].args[0] == "cd %here%/main"
+    assert mock_call.call_args_list[1].args[0] == "grep Login"
+    assert mock_call.call_args_list[2].args[0] == "cd %here%"
 
 
 @patch.object(backend, "_call_execute", new_callable=AsyncMock)
 def test_grep_rooted_absolute_restores_to_session_wd(mock_call):
-    """Restore line follows session.working_dir, not the `prev` kwarg, when
-    the path is absolute — the lane cwd needs to end up where the harness
-    thinks it is, regardless of what `prev` was originally."""
+    """Restore (third call) follows session.working_dir, not the `prev`
+    kwarg, when the path is absolute — the lane cwd needs to end up
+    where the harness thinks it is."""
     mock_call.return_value = _make_result("[lane: 1]")
     backend.grep(
         "Login", path="/main", prev="/", session=_make_session(working_dir="/main"),
     )
-    assert mock_call.call_args.args[0].endswith("cd %here%/main")
+    assert mock_call.call_args_list[2].args[0] == "cd %here%/main"
+
+
+# ── Anchor-failure short-circuit (the Codex P2 case per-wrapper) ─────
+#
+# If the anchor `cd` fails, the operation must NOT run — it would
+# resolve against the wrong cwd and produce wrong-target results. Each
+# wrapper that uses split-and-check mirrors `type_text`'s
+# anchor-failure pattern.
+
+
+@patch.object(backend, "_call_execute", new_callable=AsyncMock)
+def test_ls_anchor_failure_short_circuits(mock_call):
+    """ls absolute-path anchor failure → only the anchor call ran."""
+    mock_call.return_value = _make_result(
+        "\x1b[31mError: chrome:// not debuggable\x1b[0m"
+    )
+    sess = _make_session(working_dir="/")
+    result = backend.ls("/main", session=sess)
+    assert mock_call.call_count == 1
+    assert mock_call.call_args_list[0].args[0] == "cd %here%/main"
+    assert "error" in result
+
+
+@patch.object(backend, "_call_execute", new_callable=AsyncMock)
+def test_cat_anchor_failure_short_circuits(mock_call):
+    mock_call.return_value = _make_result(
+        "\x1b[31mError: no such path\x1b[0m"
+    )
+    sess = _make_session(working_dir="/")
+    result = backend.cat("/main/btn", session=sess)
+    assert mock_call.call_count == 1
+    assert mock_call.call_args_list[0].args[0] == "cd %here%"
+    assert "error" in result
+
+
+@patch.object(backend, "_call_execute", new_callable=AsyncMock)
+def test_click_anchor_failure_short_circuits(mock_call):
+    """Critical for click: a misdirected click could trigger an
+    unintended action. Anchor must halt before the click runs.
+    """
+    mock_call.return_value = _make_result(
+        "\x1b[31mError: chrome:// not debuggable\x1b[0m"
+    )
+    sess = _make_session(working_dir="/")
+    result = backend.click("/main/button[0]", session=sess)
+    assert mock_call.call_count == 1
+    assert mock_call.call_args_list[0].args[0] == "cd %here%"
+    assert "error" in result
+
+
+@patch.object(backend, "_call_execute", new_callable=AsyncMock)
+def test_grep_rooted_anchor_failure_short_circuits(mock_call):
+    """Rooted grep with anchor failure → grep doesn't run (wrong-scope
+    matches would be misleading). Restore also skipped because we
+    never moved off the original cwd.
+    """
+    mock_call.return_value = _make_result(
+        "\x1b[31mError: no such path /missing\x1b[0m"
+    )
+    sess = _make_session(working_dir="/")
+    result = backend.grep("Login", path="/missing", prev="/", session=sess)
+    assert mock_call.call_count == 1
+    assert mock_call.call_args_list[0].args[0] == "cd %here%/missing"
+    assert "error" in result
+
+
+# ── _parse_execute_result: dict shapes per command ───────────────────
+#
+# DOMShell 2.x returns text content; the CLI was written for the
+# pre-2.0 per-command tools that returned dicts. These tests lock in
+# the translator's per-command shape contract so the CLI doesn't break
+# on `result.get(...)` calls.
+
+
+def test_parse_execute_result_ls_extracts_entries():
+    result = _make_result("button[0]\nlink[1]\nimg[2]\n[lane: 7]")
+    parsed = backend._parse_execute_result(result, "ls")
+    assert parsed["entries"] == [
+        {"name": "button[0]", "role": "", "path": "button[0]"},
+        {"name": "link[1]", "role": "", "path": "link[1]"},
+        {"name": "img[2]", "role": "", "path": "img[2]"},
+    ]
+    # Lane marker is stripped from the raw text.
+    assert "[lane:" not in parsed["raw"]
+
+
+def test_parse_execute_result_ls_empty_text_returns_empty_entries():
+    parsed = backend._parse_execute_result(_make_result("[lane: 7]"), "ls")
+    assert parsed == {"entries": [], "raw": ""}
+
+
+def test_parse_execute_result_grep_extracts_matches():
+    result = _make_result(
+        "/main/button[0]\n/main/link[1]\n[lane: 7]"
+    )
+    parsed = backend._parse_execute_result(result, "grep")
+    assert parsed["matches"] == ["/main/button[0]", "/main/link[1]"]
+    assert "[lane:" not in parsed["raw"]
+
+
+def test_parse_execute_result_error_returns_error_dict():
+    """Errors get `error` AND `output` keys — the CLI checks `"error" in
+    result` for cd-style guards but also pretty-prints `output`."""
+    result = _make_result(
+        "\x1b[31mError: no such element\x1b[0m\n[lane: 7]"
+    )
+    parsed = backend._parse_execute_result(result, "ls")
+    assert "error" in parsed
+    assert parsed["error"].startswith("\x1b[31mError")
+    assert parsed["output"] == parsed["error"]
+
+
+def test_parse_execute_result_default_for_other_commands():
+    """cat/click/focus/type/open/refresh/back/forward all fall through
+    to the generic ``{"output": text}`` shape."""
+    for cmd in ("cat", "click", "focus", "type", "open", "refresh", "back", "forward"):
+        parsed = backend._parse_execute_result(
+            _make_result("done\n[lane: 1]"), cmd,
+        )
+        assert parsed == {"output": "done"}
+
+
+# ── End-to-end: wrappers return parsed dicts (not CallToolResult) ────
+
+
+@patch.object(backend, "_call_execute", new_callable=AsyncMock)
+def test_ls_returns_entries_dict(mock_call):
+    """`backend.ls(...)` must return ``{"entries": [...]}`` so the CLI
+    doesn't AttributeError on `result.get("entries", [])`. This is the
+    Codex P1 shipped regression."""
+    mock_call.return_value = _make_result("button[0]\n[lane: 1]")
+    result = backend.ls("main")
+    assert "entries" in result
+    assert isinstance(result["entries"], list)
+
+
+@patch.object(backend, "_call_execute", new_callable=AsyncMock)
+def test_grep_returns_matches_dict(mock_call):
+    mock_call.return_value = _make_result("/main/btn[0]\n[lane: 1]")
+    result = backend.grep("Login")
+    assert "matches" in result
+    assert result["matches"] == ["/main/btn[0]"]
+
+
+@patch.object(backend, "_call_execute", new_callable=AsyncMock)
+def test_cd_returns_dict_with_output(mock_call):
+    """`backend.cd(...)` returns a dict so `isinstance(result, dict)`
+    in fs.change_directory works and `result.get("path", path)` falls
+    back cleanly."""
+    mock_call.return_value = _make_result("✓ Entered main\n[lane: 1]")
+    result = backend.cd("/main")
+    assert isinstance(result, dict)
+    assert "error" not in result
+
+
+@patch.object(backend, "_call_execute", new_callable=AsyncMock)
+def test_cd_error_returns_error_dict(mock_call):
+    """`fs.change_directory` checks `"error" not in result` — make sure
+    error paths surface the error key so the harness's working-dir
+    update is correctly skipped."""
+    mock_call.return_value = _make_result(
+        "\x1b[31mError: no such path\x1b[0m"
+    )
+    result = backend.cd("/missing")
+    assert "error" in result
 
 
 # ── _is_error helper ─────────────────────────────────────────────────
@@ -253,40 +428,24 @@ def test_grep_unrooted_produces_single_grep_call(mock_call):
 
 
 @patch.object(backend, "_call_execute", new_callable=AsyncMock)
-def test_grep_rooted_emits_single_multiline_call(mock_call):
-    """Rooted grep is ONE multi-line ``cd / grep / cd back`` execute call.
+def test_grep_rooted_emits_three_call_sequence(mock_call):
+    """Rooted grep is THREE separate ``_call_execute`` calls: anchor →
+    grep → restore. Anchor success is load-bearing (would search the
+    wrong subtree on cwd drift), so we can't fold this into a single
+    multi-line continue-on-error call.
 
-    Each ``_call_execute`` in non-daemon mode opens a fresh MCP session
-    that lands in its own DOMShell 2.x lane, so splitting cd / grep /
-    restore across separate calls would lose the cwd between them. The
-    three lines must travel in one ``domshell_execute`` call to share
-    a lane.
+    Lane sharing across the three calls is preserved via
+    ``session.domshell_lane_id`` — see round-4 lane-persistence tests.
     """
-    mock_call.return_value = {}
+    mock_call.return_value = _make_result("[lane: 1]")
 
     backend.grep("Login", path="/main", prev="/")
 
-    # Absolute path anchors at %here%/main; restore comes from
-    # _restore_cwd_cmd(session=None) → `cd %here%` (defaults to harness `/`).
     assert mock_call.call_args_list == [
-        call("cd %here%/main\ngrep Login\ncd %here%", False, session=None),
+        call("cd %here%/main", False, session=None),
+        call("grep Login", False, session=None),
+        call("cd %here%", False, session=None),
     ]
-
-
-@patch.object(backend, "_call_execute", new_callable=AsyncMock)
-def test_grep_rooted_uses_single_call_for_lane_isolation(mock_call):
-    """Documents the lane-isolation contract: ONE call, not three.
-
-    The trailing ``cd prev`` is delivered as the final line of the same
-    multi-line command and runs even if ``grep`` errors, per DOMShell's
-    documented continue-on-error semantics
-    (`apireno/DOMShell#46 <https://github.com/apireno/DOMShell/issues/46>`_).
-    """
-    mock_call.return_value = {}
-
-    backend.grep("Login", path="/main", prev="/")
-
-    assert mock_call.call_count == 1
 
 
 @patch.object(backend, "_call_execute", new_callable=AsyncMock)
@@ -295,14 +454,16 @@ def test_grep_rooted_quotes_path_with_spaces(mock_call):
 
     Upstream-smoked: DOMShell's `cd` accepts the quoted form cleanly.
     """
-    mock_call.return_value = {}
+    mock_call.return_value = _make_result("[lane: 1]")
 
     backend.grep("Login", path="/path with spaces", prev="/")
 
-    cmd = mock_call.call_args.args[0]
-    assert cmd.startswith("cd '%here%/path with spaces'\n")
-    assert "\ngrep Login\n" in cmd
-    assert cmd.endswith("\ncd %here%")
+    # Three-call sequence — quoting applies to the anchor (first call).
+    assert mock_call.call_args_list == [
+        call("cd '%here%/path with spaces'", False, session=None),
+        call("grep Login", False, session=None),
+        call("cd %here%", False, session=None),
+    ]
 
 
 @patch.object(backend, "_call_execute", new_callable=AsyncMock)
@@ -451,8 +612,11 @@ def test_type_text_relative_path_focus_failure_skips_type(mock_call):
     # Only the focus call was made; the focus result was returned.
     assert mock_call.call_count == 1
     assert mock_call.call_args_list[0].args[0] == "focus stale_input"
-    # The focus result is returned verbatim so callers see the error.
-    assert result.content[0].text == "Error: focus: No such element"
+    # The focus result is parsed (CLI consumes dicts, not CallToolResult).
+    assert result == {
+        "error": "Error: focus: No such element",
+        "output": "Error: focus: No such element",
+    }
 
 
 def test_type_text_raises_without_session_in_non_daemon_mode():
@@ -799,11 +963,13 @@ def test_session_is_keyword_only_on_open_url():
 def test_use_daemon_positional_on_ls(mock_call):
     mock_call.return_value = _make_result("[lane: 1]")
     backend.ls("/", True)  # use_daemon=True positionally
-    # Absolute `/` with no session → anchor at %here%, bare ls, restore
-    # to %here% (the default for session=None).
-    assert mock_call.call_args == call(
-        "cd %here%\nls\ncd %here%", True, session=None,
-    )
+    # Absolute `/` with no session → 3-call sequence, use_daemon=True
+    # flows through all three calls.
+    assert mock_call.call_args_list == [
+        call("cd %here%", True, session=None),
+        call("ls", True, session=None),
+        call("cd %here%", True, session=None),
+    ]
 
 
 @patch.object(backend, "_call_execute", new_callable=AsyncMock)
