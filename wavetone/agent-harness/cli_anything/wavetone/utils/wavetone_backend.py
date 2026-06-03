@@ -79,7 +79,7 @@ def doctor(executable: str | Path | None = None) -> dict[str, Any]:
     checks.append({"name": "data directory", "ok": data_dir.is_dir(), "path": str(data_dir)})
     for filename in REQUIRED_DATA_FILES:
         path = data_dir / filename
-        checks.append({"name": f"data/{filename}", "ok": path.exists(), "path": str(path)})
+        checks.append({"name": f"data/{filename}", "ok": path.is_file(), "path": str(path)})
     help_dir = root / "wthelp"
     checks.append({"name": "help directory", "ok": help_dir.is_dir(), "path": str(help_dir)})
     checks.append(

@@ -125,7 +125,8 @@ class ReplSkin:
                         Displayed in banner for AI agents to know where to read skill info.
         """
         self.software = software.lower().replace("-", "_")
-        self.display_name = software.replace("_", " ").title()
+        display_overrides = {"wavetone": "WaveTone"}
+        self.display_name = display_overrides.get(self.software, software.replace("_", " ").title())
         self.version = version
         software_aliases = {"iterm2_ctl": "iterm2"}
         self.skill_slug = software_aliases.get(self.software, self.software).replace("_", "-")
@@ -231,6 +232,8 @@ class ReplSkin:
 
         meta_lines: list[str] = []
         meta_lines.extend(_meta_lines("Install:", self.skill_install_cmd))
+        if self.skill_path:
+            meta_lines.extend(_meta_lines("Local skill:", _display_home_path(self.skill_path)))
         meta_lines.extend(_meta_lines("Global skill:", _display_home_path(self.global_skill_path)))
         print(top)
         print(_box_line(title))

@@ -23,6 +23,7 @@ from cli_anything.wavetone.core.project import (
 from cli_anything.wavetone.core.session import append_event, load_events
 from cli_anything.wavetone.tests.helpers import make_wav
 from cli_anything.wavetone.utils import wavetone_backend
+from cli_anything.wavetone.utils.repl_skin import ReplSkin
 from cli_anything.wavetone.wavetone_cli import _split_repl_args, cli
 
 
@@ -249,6 +250,34 @@ def test_find_wavetone_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     assert wavetone_backend.find_wavetone() == fake.resolve()
 
 
+def test_doctor_rejects_required_data_directories(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "wavetone"
+    data_dir = root / "data"
+    help_dir = root / "wthelp"
+    data_dir.mkdir(parents=True)
+    help_dir.mkdir()
+    exe = root / "wavetone.exe"
+    exe.write_bytes(b"MZ")
+
+    directory_artifact = wavetone_backend.REQUIRED_DATA_FILES[0]
+    for filename in wavetone_backend.REQUIRED_DATA_FILES:
+        path = data_dir / filename
+        if filename == directory_artifact:
+            path.mkdir()
+        else:
+            path.write_bytes(b"x")
+
+    monkeypatch.setenv("WAVETONE_EXE", str(exe))
+    monkeypatch.setattr(wavetone_backend.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(wavetone_backend.platform, "platform", lambda: "Windows-test")
+
+    status = wavetone_backend.doctor()
+    artifact = next(check for check in status["checks"] if check["name"] == f"data/{directory_artifact}")
+
+    assert status["ready"] is False
+    assert artifact["ok"] is False
+
+
 def test_cli_preserves_inherited_project_and_json_context(tmp_path: Path) -> None:
     wav = make_wav(tmp_path / "tone.wav")
     project_path = save_project(create_project(wav), tmp_path / "tone.wt.json")
@@ -314,6 +343,20 @@ def test_repl_split_strips_windows_quotes() -> None:
         "-o",
         "C:\\Users\\me\\song.wt.json",
     ]
+
+
+def test_repl_skin_uses_wavetone_branding_and_local_skill_path(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    skill_path = tmp_path / "SKILL.md"
+    skill_path.write_text("# WaveTone", encoding="utf-8")
+    skin = ReplSkin("WaveTone", version="test", history_file=str(tmp_path / "history"), skill_path=str(skill_path))
+
+    skin.print_banner()
+    output = capsys.readouterr().out
+
+    assert skin.display_name == "WaveTone"
+    assert "WaveTone" in output
+    assert "Local skill:" in output
+    assert "SKILL.md" in output
 
 
 def test_repl_reports_click_exit_without_unexpected_error(monkeypatch: pytest.MonkeyPatch) -> None:

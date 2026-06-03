@@ -16,17 +16,18 @@ REAL_BACKEND_ENV = "CLI_ANYTHING_WAVETONE_REAL_BACKEND"
 
 
 def _resolve_cli(name: str) -> list[str]:
-    """Resolve installed CLI command; fall back to python -m for development."""
+    """Run the in-tree module by default; installed entry points are opt-in."""
     force = os.environ.get("CLI_ANYTHING_FORCE_INSTALLED", "").strip() == "1"
-    path = shutil.which(name)
-    if path:
-        print(f"[_resolve_cli] Using installed command: {path}")
-        return [path]
-    if force:
-        raise RuntimeError(f"{name} not found in PATH. Install with: pip install -e .")
     module = "cli_anything.wavetone.wavetone_cli"
-    print(f"[_resolve_cli] Falling back to: {sys.executable} -m {module}")
-    return [sys.executable, "-m", module]
+    if not force:
+        print(f"[_resolve_cli] Using source module: {sys.executable} -m {module}")
+        return [sys.executable, "-m", module]
+
+    path = shutil.which(name)
+    if not path:
+        raise RuntimeError(f"{name} not found in PATH. Install with: pip install -e .")
+    print(f"[_resolve_cli] Using installed command: {path}")
+    return [path]
 
 
 def _env_flag_enabled(name: str) -> bool:
@@ -62,6 +63,13 @@ def test_real_backend_requires_explicit_opt_in(monkeypatch: pytest.MonkeyPatch) 
 
     assert ready is False
     assert REAL_BACKEND_ENV in reason
+
+
+def test_resolve_cli_defaults_to_source_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CLI_ANYTHING_FORCE_INSTALLED", raising=False)
+    monkeypatch.setattr(shutil, "which", lambda name: "C:/foreign/cli-anything-wavetone.exe")
+
+    assert _resolve_cli("cli-anything-wavetone") == [sys.executable, "-m", "cli_anything.wavetone.wavetone_cli"]
 
 
 class TestCLISubprocess:

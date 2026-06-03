@@ -88,7 +88,7 @@ def cli(ctx: click.Context, project_path: str | None, json_mode: bool) -> None:
 @click.pass_context
 def repl(ctx: click.Context) -> None:
     """Start an interactive command loop."""
-    skin = ReplSkin("wavetone", version=__version__)
+    skin = ReplSkin("WaveTone", version=__version__)
     skin.print_banner()
     skin.info("Type 'help' for commands, 'exit' to quit.")
     prompt_session = skin.create_prompt_session()
