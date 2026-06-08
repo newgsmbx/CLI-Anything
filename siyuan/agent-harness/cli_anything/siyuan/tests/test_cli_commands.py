@@ -144,25 +144,16 @@ class TestDocTreeCommand:
     def test_doc_tree_returns_files(self, runner, mock_ctx):
         """doc tree handles API returning dict with 'files' key."""
         mock_ctx.client.list_doc_tree.return_value = {
-            "tree": [
-                {"id": "doc1", "name": "根文档"},
-                {"id": "doc2", "name": "父文档", "children": [
-                    {"id": "doc3", "name": "子文档"},
-                    {"id": "doc4", "name": "孙文档", "children": [
-                        {"id": "doc5", "name": "曾孙文档"},
-                    ]},
-                ]},
+            "files": [
+                {"id": "doc1", "name": "根文档", "depth": 0},
+                {"id": "doc2", "name": "子文档", "depth": 1},
             ],
         }
         with patch("cli_anything.siyuan.siyuan_cli.SiYuanContext", return_value=mock_ctx):
             result = runner.invoke(cli, ["doc", "tree", "nb1"])
             assert result.exit_code == 0
             assert "根文档" in result.output
-            assert "doc1" in result.output
-            assert "父文档" in result.output
             assert "子文档" in result.output
-            assert "孙文档" in result.output
-            assert "曾孙文档" in result.output
 
     def test_doc_tree_json(self, runner, mock_ctx):
         """--json doc tree returns raw files array."""
@@ -248,6 +239,7 @@ class TestStatusCommand:
             mock_session.state.current_notebook_id = "nb1"
             mock_session.state.current_notebook_name = "工作"
             mock_session.state.current_doc_id = "doc1"
+            mock_ctx.client.get_version.return_value = "3.6.5"
             mock_ctx.session = mock_session
             mock_ctx.current_notebook_id = "nb1"
             mock_ctx.current_notebook_name = "工作"
@@ -325,3 +317,92 @@ class TestDocGetCommand:
             result = runner.invoke(cli, ["doc", "get", "doc123"])
             assert result.exit_code == 0
             assert "/我的文档/测试" in result.output
+
+
+# ── Doc create command ──────────────────────────────────────────────────
+
+
+class TestDocCreateCommand:
+    def test_doc_create_without_md(self, runner, mock_ctx):
+        """doc create without --md does not read stdin (passes empty string)."""
+        mock_ctx.client.create_doc_with_md.return_value = "doc123"
+        with (
+            patch("cli_anything.siyuan.siyuan_cli.SiYuanContext", return_value=mock_ctx),
+        ):
+            result = runner.invoke(cli, ["doc", "create", "nb1", "/test"])
+            assert result.exit_code == 0
+            assert "doc123" in result.output
+
+    def test_doc_create_with_md(self, runner, mock_ctx):
+        """doc create with --md passes the markdown content."""
+        mock_ctx.client.create_doc_with_md.return_value = "doc123"
+        with (
+            patch("cli_anything.siyuan.siyuan_cli.SiYuanContext", return_value=mock_ctx),
+        ):
+            result = runner.invoke(cli, ["doc", "create", "nb1", "/test", "--md", "# Hello"])
+            assert result.exit_code == 0
+            mock_ctx.client.create_doc_with_md.assert_called_with("nb1", "/test", "# Hello")
+            assert "doc123" in result.output
+
+    def test_doc_create_json_output(self, runner, mock_ctx):
+        """--json doc create returns doc ID."""
+        mock_ctx.json_output = True
+        mock_ctx.client.create_doc_with_md.return_value = "doc123"
+        with (
+            patch("cli_anything.siyuan.siyuan_cli.SiYuanContext", return_value=mock_ctx),
+        ):
+            result = runner.invoke(cli, ["--json", "doc", "create", "nb1", "/test"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["id"] == "doc123"
+
+
+# ── Doc tree recursive rendering ──────────────────────────────────────
+
+
+class TestDocTreeRecursiveCommand:
+    def test_doc_tree_handle_nested_children(self, runner, mock_ctx):
+        """doc tree recursively renders nested children."""
+        mock_ctx.client.list_doc_tree.return_value = {
+            "files": [
+                {
+                    "id": "doc1", "name": "Root", "depth": 0,
+                    "children": [
+                        {"id": "doc2", "name": "Child", "depth": 1, "children": []},
+                    ],
+                },
+                {"id": "doc3", "name": "Sibling", "depth": 0, "children": []},
+            ],
+        }
+        with patch("cli_anything.siyuan.siyuan_cli.SiYuanContext", return_value=mock_ctx):
+            result = runner.invoke(cli, ["doc", "tree", "nb1"])
+            assert result.exit_code == 0
+            assert "Root" in result.output
+            assert "Child" in result.output
+            assert "Sibling" in result.output
+            assert "doc1" in result.output
+            assert "doc2" in result.output
+
+    def test_doc_tree_flat_items(self, runner, mock_ctx):
+        """doc tree also works with flat items (no children key)."""
+        mock_ctx.client.list_doc_tree.return_value = [
+            {"id": "doc1", "name": "Flat1", "depth": 0},
+            {"id": "doc2", "name": "Flat2", "depth": 1},
+        ]
+        with patch("cli_anything.siyuan.siyuan_cli.SiYuanContext", return_value=mock_ctx):
+            result = runner.invoke(cli, ["doc", "tree", "nb1"])
+            assert result.exit_code == 0
+            assert "Flat1" in result.output
+            assert "Flat2" in result.output
+
+    def test_doc_tree_nested_json_output(self, runner, mock_ctx):
+        """--json doc tree with nested children returns raw data."""
+        mock_ctx.json_output = True
+        mock_ctx.client.list_doc_tree.return_value = {
+            "files": [{"id": "doc1", "name": "Root", "children": []}],
+        }
+        with patch("cli_anything.siyuan.siyuan_cli.SiYuanContext", return_value=mock_ctx):
+            result = runner.invoke(cli, ["--json", "doc", "tree", "nb1"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data[0]["id"] == "doc1"

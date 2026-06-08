@@ -159,3 +159,46 @@ class TestSessionManager:
         mgr.update(current_notebook_id="nb1")
         assert mgr.state.current_notebook_id == "nb1"
         assert mgr.state.connected is False  # unchanged
+
+
+class TestFindReplace:
+    """Tests for find_replace using SiYuan API k/r/ids payload."""
+
+    @pytest.fixture
+    def client(self):
+        return SiYuanClient(SiYuanConfig(token="test-token"))
+
+    def test_find_replace_uses_k_r_ids_payload(self, client):
+        """find_replace sends k/r/ids payload keys."""
+        mock_session = MagicMock()
+        mock_session.post.return_value.status_code = 200
+        mock_session.post.return_value.json.return_value = {"code": 0, "data": {"count": 3}}
+        client._session = mock_session
+        client.find_replace("old", "new", ["id1", "id2"])
+        call_kwargs = mock_session.post.call_args[1]
+        body = call_kwargs["json"]
+        assert "k" in body
+        assert "r" in body
+        assert "ids" in body
+        assert body["k"] == "old"
+        assert body["r"] == "new"
+        assert body["ids"] == ["id1", "id2"]
+
+class TestUncappedListings:
+    """Tests for list_docs_by_path with maxListCount."""
+
+    @pytest.fixture
+    def client(self):
+        return SiYuanClient(SiYuanConfig(token="test-token"))
+
+    def test_list_docs_by_path_sends_max_list_count(self, client):
+        """list_docs_by_path sends maxListCount: 0 for uncapped listings."""
+        mock_session = MagicMock()
+        mock_session.post.return_value.status_code = 200
+        mock_session.post.return_value.json.return_value = {"code": 0, "data": {"files": [{"id": "doc1", "name": "test"}]}}
+        client._session = mock_session
+        client.list_docs_by_path("nb1", "/")
+        call_kwargs = mock_session.post.call_args[1]
+        body = call_kwargs["json"]
+        assert "maxListCount" in body
+        assert body["maxListCount"] == 0
