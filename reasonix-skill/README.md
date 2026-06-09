@@ -40,7 +40,7 @@ run_skill({ name: "cli-anything", arguments: "/path/to/software" })
 
 ### What It Does
 
-The skill spawns an isolated Reasonix sub-agent that follows the CLI-Anything 7-phase methodology:
+The skill follows the CLI-Anything 7-phase methodology:
 
 1. **Codebase Analysis** — Surveys the target software's architecture, data model, and API surface
 2. **CLI Architecture Design** — Designs command groups, state model, and output formats
@@ -72,7 +72,7 @@ The skill spawns an isolated Reasonix sub-agent that follows the CLI-Anything 7-
 | Code editing | `edit_file` / `multi_edit` |
 | Source reading | `read_file` |
 | Codebase search | `grep` / `glob` / `ls` |
-| Architecture analysis | `mcp__codegraph__*` when CodeGraph is enabled |
+| Architecture analysis | `mcp__codegraph__search` / `mcp__codegraph__context` when CodeGraph is enabled |
 | Documentation fetch | `web_fetch` |
 
 ## File Structure
@@ -95,7 +95,7 @@ reasonix-skill/
 | Skill format | `.claude-plugin/` | `SKILL.md` + YAML | `SKILL.md` + YAML | `SKILL.md` + YAML |
 | Shell | `bash` | `terminal` | `terminal` | `bash` |
 | File ops | native | `execute_code` | `execute_code` / `write_file` | `write_file` / `edit_file` / `multi_edit` |
-| Code analysis | file reads | file reads | file reads | Optional `mcp__codegraph__*` symbol graph |
+| Code analysis | file reads | file reads | file reads | Optional `mcp__codegraph__search` / `mcp__codegraph__context` symbol graph |
 | Install method | `/plugin install` | `install.sh` → `$CODEX_HOME/skills/` | `install.sh` → `$HERMES_HOME/skills/` | `install.sh` → `~/.reasonix/skills/` |
 
 ## Contributing

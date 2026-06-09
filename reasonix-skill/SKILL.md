@@ -38,12 +38,12 @@ Reasonix agents build harnesses by combining these built-in tools:
 | `grep` | Search for patterns across the target software codebase (APIs, CLI tools, data models) |
 | `glob` | Find files matching patterns in the source tree (*.py, *.xml, *.json, etc.) |
 | `ls` | List directory contents to understand project structure |
-| `mcp__codegraph__*` | Optional code graph analysis when CodeGraph is enabled |
+| `mcp__codegraph__search` / `mcp__codegraph__context` | Optional code graph analysis when CodeGraph is enabled (Reasonix strips the `codegraph_` raw prefix, so the model-visible names omit it) |
 | `web_fetch` | Fetch documentation, API references, or remote files from the web |
 
 ### Recommended Workflow with Reasonix Tools
 
-**Phase 1 (Analysis)** — Use `ls` + `glob` to survey the source tree, `grep` to find API surfaces and CLI entry points, and `read_file` to inspect key files. When CodeGraph is enabled and its tools are available, use `mcp__codegraph__codegraph_search` and `mcp__codegraph__codegraph_context` for deeper symbol and architecture analysis.
+**Phase 1 (Analysis)** — Use `ls` + `glob` to survey the source tree, `grep` to find API surfaces and CLI entry points, and `read_file` to inspect key files. When CodeGraph is enabled and its tools are available, use `mcp__codegraph__search` and `mcp__codegraph__context` for deeper symbol and architecture analysis.
 
 **Phase 2-3 (Design & Implementation)** — Use `write_file` to create new harness files, `edit_file` / `multi_edit` to refine generated code, and `bash` to run `pip install -e .` for installation.
 

@@ -651,7 +651,7 @@ Use CLI-Anything to validate ./libreoffice
 
 The Reasonix skill adapts the same methodology used by the Claude Code plugin and
 Codex/Hermes skills, binding Reasonix's `bash`, `write_file`, `edit_file`,
-`multi_edit`, `grep`, `glob`, and optional `mcp__codegraph__*` tools to the
+`multi_edit`, `grep`, `glob`, and optional `mcp__codegraph__search` / `mcp__codegraph__context` tools to the
 7-phase harness workflow while keeping the generated Python harness format unchanged.
 </details>
 
